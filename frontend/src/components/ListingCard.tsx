@@ -3,6 +3,7 @@ import type { Listing } from '../types'
 
 interface Props {
   listing: Listing
+  isOwn?: boolean
 }
 
 const statusDot: Record<string, string> = {
@@ -17,7 +18,7 @@ const statusLabel: Record<string, string> = {
   BLOCKED: 'Зарезервирован',
 }
 
-export default function ListingCard({ listing }: Props) {
+export default function ListingCard({ listing, isOwn = false }: Props) {
   const eventDate = listing.event?.event_date
     ? new Date(listing.event.event_date).toLocaleDateString('ru-RU', {
         day: 'numeric', month: 'short', year: 'numeric',
@@ -93,9 +94,14 @@ export default function ListingCard({ listing }: Props) {
             )}
           </div>
 
-          {listing.status === 'ACTIVE' && (
+          {listing.status === 'ACTIVE' && !isOwn && (
             <span className="text-xs font-semibold text-brand-600 bg-brand-50 px-3 py-1.5 rounded-lg group-hover:bg-brand-600 group-hover:text-white transition-colors">
               Купить →
+            </span>
+          )}
+          {listing.status === 'ACTIVE' && isOwn && (
+            <span className="text-xs font-medium text-gray-400 bg-gray-50 px-3 py-1.5 rounded-lg">
+              Моё объявление
             </span>
           )}
         </div>

@@ -127,18 +127,52 @@ def create_listing():
 
 @listings_bp.get("")
 def list_listings():
-    """Список активных объявлений."""
+    """Список активных объявлений с поиском, фильтрами и сортировкой.
+
+    Query params:
+      q        — поиск по названию события или городу
+      city     — фильтр по городу
+      category — фильтр по категории (concert, sport, theatre...)
+      sort     — price_asc | price_desc | date_asc | date_desc | newest (default)
+      page, per_page
+    """
+    from app.models.event import Event as EventModel
     page = request.args.get("page", 1, type=int)
-    per_page = min(request.args.get("per_page", 20, type=int), 100)
+    per_page = min(request.args.get("per_page", 12, type=int), 100)
     event_id = request.args.get("event_id")
+    q = request.args.get("q", "").strip()
+    city = request.args.get("city", "").strip()
+    category = request.args.get("category", "").strip()
+    sort = request.args.get("sort", "newest")
 
-    query = Listing.query.filter_by(status=ListingStatus.ACTIVE)
+    query = Listing.query.join(EventModel, Listing.event_id == EventModel.id)\
+        .filter(Listing.status == ListingStatus.ACTIVE)
+
     if event_id:
-        query = query.filter_by(event_id=event_id)
+        query = query.filter(Listing.event_id == event_id)
+    if q:
+        query = query.filter(
+            db.or_(
+                EventModel.title.ilike(f"%{q}%"),
+                EventModel.city.ilike(f"%{q}%"),
+                EventModel.venue.ilike(f"%{q}%"),
+            )
+        )
+    if city:
+        query = query.filter(EventModel.city.ilike(f"%{city}%"))
+    if category:
+        query = query.filter(EventModel.category == category)
 
-    pagination = query.order_by(Listing.created_at.desc()).paginate(
-        page=page, per_page=per_page, error_out=False
-    )
+    sort_map = {
+        "price_asc":  Listing.price.asc(),
+        "price_desc": Listing.price.desc(),
+        "date_asc":   EventModel.event_date.asc(),
+        "date_desc":  EventModel.event_date.desc(),
+        "newest":     Listing.created_at.desc(),
+    }
+    query = query.order_by(sort_map.get(sort, Listing.created_at.desc()))
+
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     return jsonify({
         "items": [l.to_dict(include_event=True, include_ticket=True) for l in pagination.items],
         "total": pagination.total,
