@@ -1,6 +1,6 @@
 """POST /listings, GET /listings, GET /listings/{id}, DELETE /listings/{id}"""
 import logging
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.extensions import db
 from app.models.event import Event
@@ -40,15 +40,21 @@ def create_listing():
         data = request.get_json(silent=True) or {}
         file = None
 
-    # Валидация обязательных полей
-    for field in ["event_id", "price", "external_ticket_id", "organizer_id"]:
+    # Валидация обязательных полей (price проверяем отдельно, т.к. 0 — falsy)
+    for field in ["event_id", "external_ticket_id", "organizer_id"]:
         if not data.get(field):
             return jsonify({"error": f"{field} is required"}), 400
+
+    if data.get("price") is None:
+        return jsonify({"error": "price is required"}), 400
 
     try:
         price = float(data["price"])
     except (ValueError, TypeError):
         return jsonify({"error": "price must be a number"}), 400
+
+    if price <= 0:
+        return jsonify({"error": "price must be positive"}), 400
 
     event = Event.query.get(data["event_id"])
     if not event:
@@ -72,8 +78,8 @@ def create_listing():
     if not validation.is_valid:
         return jsonify({"error": "ticket validation failed", "detail": validation.error}), 422
 
-    # Проверка наценки: не более 20% от исходной цены
-    if validation.face_value:
+    # Проверка наценки: не более 20% от исходной цены (в DEBUG пропускаем)
+    if validation.face_value and not current_app.config.get("DEBUG"):
         max_price = validation.face_value * (1 + Config.MAX_RESALE_MARKUP_PERCENT / 100)
         if price > max_price:
             return jsonify({
