@@ -4,6 +4,7 @@ export interface User {
   full_name: string
   phone?: string
   role: string
+  balance?: number
 }
 
 export interface Event {

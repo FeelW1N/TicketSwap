@@ -57,9 +57,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         {user?.full_name?.charAt(0).toUpperCase() ?? '?'}
                       </span>
                     </div>
-                    <span className="text-sm text-gray-700 font-medium max-w-[120px] truncate hidden sm:block">
-                      {user?.full_name}
-                    </span>
+                    <div className="hidden sm:flex flex-col leading-none">
+                      <span className="text-sm text-gray-700 font-medium max-w-[120px] truncate">
+                        {user?.full_name}
+                      </span>
+                      <span className="text-xs text-brand-600 font-semibold">
+                        ₽ {(user?.balance ?? 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
                     <button
                       onClick={handleLogout}
                       className="text-xs text-gray-400 hover:text-red-500 transition-colors px-1"
@@ -109,7 +114,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </p>
             <div className="flex items-center gap-1 text-xs text-gray-400">
               <span className="w-2 h-2 rounded-full bg-green-400 inline-block"></span>
-              Защищено · Stripe · MinIO
+              Защищено · YooKassa · MinIO
             </div>
           </div>
         </div>
