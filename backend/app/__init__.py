@@ -26,6 +26,10 @@ def create_app(config_class=Config) -> Flask:
     app.register_blueprint(tickets_bp)
     app.register_blueprint(events_bp)
 
+    # Seed command
+    from seed import register_seed_command
+    register_seed_command(app)
+
     # Health check
     @app.get("/health")
     def health():
