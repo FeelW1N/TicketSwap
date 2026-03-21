@@ -12,6 +12,7 @@ import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
+import ProfilePage from './pages/ProfilePage'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
@@ -39,6 +40,7 @@ export default function App() {
           <Route path="/sell" element={<PrivateRoute><SellPage /></PrivateRoute>} />
           <Route path="/orders" element={<PrivateRoute><OrdersPage /></PrivateRoute>} />
           <Route path="/orders/:id" element={<PrivateRoute><OrderDetailPage /></PrivateRoute>} />
+          <Route path="/profile" element={<PrivateRoute><ProfilePage /></PrivateRoute>} />
         </Routes>
       </Layout>
     </BrowserRouter>

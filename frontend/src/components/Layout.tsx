@@ -52,19 +52,21 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                     Покупки
                   </Link>
                   <div className="flex items-center gap-2 pl-2 ml-1 border-l border-gray-100">
-                    <div className="w-7 h-7 rounded-full bg-brand-100 flex items-center justify-center">
-                      <span className="text-xs font-bold text-brand-700">
-                        {user?.full_name?.charAt(0).toUpperCase() ?? '?'}
-                      </span>
-                    </div>
-                    <div className="hidden sm:flex flex-col leading-none">
-                      <span className="text-sm text-gray-700 font-medium max-w-[120px] truncate">
-                        {user?.full_name}
-                      </span>
-                      <span className="text-xs text-brand-600 font-semibold">
-                        ₽ {(user?.balance ?? 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </span>
-                    </div>
+                    <Link to="/profile" className="flex items-center gap-2 group">
+                      <div className="w-7 h-7 rounded-full bg-brand-100 flex items-center justify-center group-hover:bg-brand-200 transition-colors">
+                        <span className="text-xs font-bold text-brand-700">
+                          {user?.full_name?.charAt(0).toUpperCase() ?? '?'}
+                        </span>
+                      </div>
+                      <div className="hidden sm:flex flex-col leading-none">
+                        <span className="text-sm text-gray-700 font-medium max-w-[120px] truncate group-hover:text-brand-700 transition-colors">
+                          {user?.full_name}
+                        </span>
+                        <span className="text-xs text-brand-600 font-semibold">
+                          ₽ {(user?.balance ?? 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </Link>
                     <button
                       onClick={handleLogout}
                       className="text-xs text-gray-400 hover:text-red-500 transition-colors px-1"
