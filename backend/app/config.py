@@ -24,9 +24,9 @@ class Config:
     CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
     CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
 
-    # Stripe
-    STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "sk_test_placeholder")
-    STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_placeholder")
+    # YooKassa (в DEBUG=true оплата автоматическая — реальные ключи не нужны)
+    YOOKASSA_SHOP_ID = os.environ.get("YOOKASSA_SHOP_ID", "debug-shop-id")
+    YOOKASSA_SECRET_KEY = os.environ.get("YOOKASSA_SECRET_KEY", "debug-secret-key")
 
     # S3-совместимое хранилище (MinIO локально или AWS S3 в проде)
     AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", "minioadmin")
@@ -38,6 +38,13 @@ class Config:
     S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL", "http://localhost:9000")
     # MinIO: публичный URL (для presigned-ссылок, открываемых браузером)
     S3_PUBLIC_ENDPOINT_URL = os.environ.get("S3_PUBLIC_ENDPOINT_URL", "http://localhost:9000")
+
+    # Email (SMTP). Если не задан SMTP_HOST — письма только в лог (dev-режим).
+    SMTP_HOST = os.environ.get("SMTP_HOST")
+    SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+    SMTP_USER = os.environ.get("SMTP_USER", "")
+    SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+    SMTP_FROM = os.environ.get("SMTP_FROM", "noreply@ticketswap.ru")
 
     # Organizer API (mock)
     ORGANIZER_API_BASE_URL = os.environ.get("ORGANIZER_API_BASE_URL", "http://localhost:8001")

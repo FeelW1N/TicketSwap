@@ -1,6 +1,6 @@
-"""POST /payments/create, POST /payments/webhook"""
+"""POST /payments/create, POST /payments/webhook (YooKassa / debug auto-confirm)"""
 import logging
-import stripe
+import uuid
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.extensions import db
@@ -18,9 +18,10 @@ payments_bp = Blueprint("payments", __name__, url_prefix="/payments")
 @jwt_required()
 def create_payment():
     """
-    FR3: Создание платежа в Stripe для заказа.
-    Возвращает checkout_url для редиректа покупателя.
-    Идемпотентен: повторный вызов для существующего CREATED платежа вернёт тот же URL.
+    FR3: Создание платежа для заказа.
+    DEBUG=true → авто-подтверждение без внешней оплаты.
+    PROD → YooKassa, возвращает checkout_url для редиректа.
+    Идемпотентен: повторный вызов вернёт существующий CREATED платёж.
     """
     user_id = get_jwt_identity()
     data = request.get_json(silent=True) or {}
@@ -40,41 +41,62 @@ def create_payment():
         return jsonify({"error": "order is not awaiting payment"}), 409
 
     # Идемпотентность: если платёж уже создан — возвращаем существующий
-    existing_payment = Payment.query.filter_by(order_id=order.id).first()
-    if existing_payment and existing_payment.status == PaymentStatus.CREATED:
-        return jsonify({"payment": existing_payment.to_dict()})
+    existing = Payment.query.filter_by(order_id=order.id).first()
+    if existing and existing.status == PaymentStatus.CREATED:
+        return jsonify({"payment": existing.to_dict()})
 
-    stripe.api_key = current_app.config["STRIPE_SECRET_KEY"]
-
-    try:
-        checkout_session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            line_items=[{
-                "price_data": {
-                    "currency": "rub",
-                    "product_data": {"name": f"Ticket order #{str(order.id)[:8]}"},
-                    "unit_amount": int(order.amount * 100),  # копейки
-                },
-                "quantity": 1,
-            }],
-            mode="payment",
-            success_url=current_app.config.get("FRONTEND_URL", "http://localhost:3000") + f"/orders/{order.id}?success=1",
-            cancel_url=current_app.config.get("FRONTEND_URL", "http://localhost:3000") + f"/orders/{order.id}?cancelled=1",
-            metadata={"order_id": str(order.id)},
-            idempotency_key=f"order-{str(order.id)}",
+    # ─── DEBUG-режим: автоматическое подтверждение (реальных денег нет) ───
+    if current_app.config.get("DEBUG"):
+        payment = Payment(
+            order_id=order.id,
+            provider="debug",
+            provider_payment_id=f"debug-{uuid.uuid4().hex[:12]}",
+            amount=order.amount,
+            currency="rub",
+            status=PaymentStatus.CREATED,
+            checkout_url=None,  # нет редиректа — сразу на страницу заказа
         )
-    except stripe.error.StripeError as e:
-        logger.error("Stripe error: %s", e)
+        db.session.add(payment)
+        db.session.flush()
+
+        _confirm_payment(order, payment, event_id=f"debug-evt-{uuid.uuid4().hex[:8]}")
+
+        log_event("PAYMENT_CREATED", "payment", str(payment.id), user_id,
+                  {"order_id": str(order.id), "amount": float(order.amount), "mode": "debug_auto"})
+
+        return jsonify({"payment": payment.to_dict()}), 201
+
+    # ─── PROD: YooKassa ───
+    try:
+        from yookassa import Configuration, Payment as YooPayment
+        Configuration.account_id = current_app.config["YOOKASSA_SHOP_ID"]
+        Configuration.secret_key = current_app.config["YOOKASSA_SECRET_KEY"]
+
+        frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:3000")
+        yk = YooPayment.create({
+            "amount": {"value": f"{float(order.amount):.2f}", "currency": "RUB"},
+            "confirmation": {
+                "type": "redirect",
+                "return_url": f"{frontend_url}/orders/{order.id}?success=1",
+            },
+            "capture": True,
+            "description": f"Билет — заказ #{str(order.id)[:8]}",
+            "metadata": {"order_id": str(order.id)},
+        }, idempotency_key=f"order-{str(order.id)}")
+    except Exception as e:
+        logger.error("YooKassa error: %s", e)
         return jsonify({"error": "payment provider error", "detail": str(e)}), 502
+
+    checkout_url = yk.confirmation.confirmation_url if yk.confirmation else None
 
     payment = Payment(
         order_id=order.id,
-        provider="stripe",
-        provider_payment_id=checkout_session.id,
+        provider="yookassa",
+        provider_payment_id=yk.id,
         amount=order.amount,
         currency="rub",
         status=PaymentStatus.CREATED,
-        checkout_url=checkout_session.url,
+        checkout_url=checkout_url,
     )
     db.session.add(payment)
     db.session.commit()
@@ -86,67 +108,56 @@ def create_payment():
 
 
 @payments_bp.post("/webhook")
-def stripe_webhook():
+def yookassa_webhook():
     """
-    FR3: Stripe webhook — подтверждение платежа.
-    Идемпотентен по provider_event_id.
+    YooKassa webhook: payment.succeeded / payment.canceled.
+    В DEBUG-режиме не используется — подтверждение происходит автоматически в /create.
     """
-    payload = request.get_data()
-    sig_header = request.headers.get("Stripe-Signature")
-    webhook_secret = current_app.config["STRIPE_WEBHOOK_SECRET"]
+    if current_app.config.get("DEBUG"):
+        return jsonify({"status": "ok"})
 
-    try:
-        event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
-    except stripe.error.SignatureVerificationError:
-        logger.warning("Invalid Stripe webhook signature")
-        return jsonify({"error": "invalid signature"}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
+    data = request.get_json(silent=True) or {}
+    event_type = data.get("event")
+    obj = data.get("object", {})
+    payment_yk_id = obj.get("id")
+    event_id = data.get("id") or payment_yk_id
 
-    event_id = event["id"]
-    event_type = event["type"]
+    if not payment_yk_id or not event_type:
+        return jsonify({"error": "invalid payload"}), 400
 
-    # Дедупликация: не обрабатывать повторные webhook
+    # Дедупликация
     if Payment.query.filter_by(provider_event_id=event_id).first():
         logger.info("Duplicate webhook event %s — skipping", event_id)
         return jsonify({"status": "duplicate"}), 200
 
-    if event_type == "checkout.session.completed":
-        session = event["data"]["object"]
-        order_id = session.get("metadata", {}).get("order_id")
+    if event_type == "payment.succeeded":
+        metadata = obj.get("metadata", {})
+        order_id = metadata.get("order_id")
         if not order_id:
             return jsonify({"error": "missing order_id in metadata"}), 400
 
         order = Order.query.get(order_id)
-        payment = Payment.query.filter_by(provider_payment_id=session["id"]).first()
+        payment = Payment.query.filter_by(provider_payment_id=payment_yk_id).first()
 
         if not order or not payment:
-            logger.error("Order or payment not found for webhook: order=%s", order_id)
+            logger.error("Order/payment not found: order=%s payment_id=%s", order_id, payment_yk_id)
             return jsonify({"error": "not found"}), 404
 
-        payment.provider_event_id = event_id
-        payment.status = PaymentStatus.CONFIRMED
-        order.status = OrderStatus.PAID
-        db.session.commit()
-
+        _confirm_payment(order, payment, event_id=event_id)
         log_event("PAYMENT_CONFIRMED", "payment", str(payment.id),
                   details={"order_id": str(order.id)})
 
-        # FR4: Запускаем переоформление асинхронно
-        _trigger_reissue(order)
-
-    elif event_type in ("checkout.session.expired", "payment_intent.payment_failed"):
-        session = event["data"]["object"]
-        order_id = (session.get("metadata") or {}).get("order_id")
+    elif event_type == "payment.canceled":
+        metadata = obj.get("metadata", {})
+        order_id = metadata.get("order_id")
         if order_id:
             order = Order.query.get(order_id)
-            payment = Payment.query.filter_by(provider_payment_id=session.get("id")).first()
+            payment = Payment.query.filter_by(provider_payment_id=payment_yk_id).first()
             if order and order.status == OrderStatus.PENDING_PAYMENT:
                 order.status = OrderStatus.FAILED
                 if payment:
                     payment.provider_event_id = event_id
                     payment.status = PaymentStatus.FAILED
-                # Разблокируем листинг
                 from app.models.listing import ListingStatus
                 if order.listing:
                     order.listing.status = ListingStatus.ACTIVE
@@ -156,6 +167,17 @@ def stripe_webhook():
                           details={"order_id": order_id})
 
     return jsonify({"status": "ok"})
+
+
+# ─── helpers ────────────────────────────────────────────────────────────────
+
+def _confirm_payment(order: Order, payment: Payment, event_id: str) -> None:
+    """Помечает платёж подтверждённым и запускает переоформление."""
+    payment.provider_event_id = event_id
+    payment.status = PaymentStatus.CONFIRMED
+    order.status = OrderStatus.PAID
+    db.session.commit()
+    _trigger_reissue(order)
 
 
 def _trigger_reissue(order: Order) -> None:
