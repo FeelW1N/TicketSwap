@@ -3,7 +3,7 @@
 ## Концепция
 
 Ключевое отличие от Avito/ЮЛА: **атомарное переоформление** через API организатора.
-После оплаты старый билет аннулируется, покупатель получает **новый** билет с его именем.
+После оплаты старый билет аннулируется, покупатель получает **новый** билет с его именем — мошенничество с перепродажей одного билета нескольким людям исключено.
 
 ## Структура проекта
 
@@ -11,17 +11,17 @@
 ticketswap/
 ├── backend/          # Flask API + Celery
 │   ├── app/
-│   │   ├── models/   # User, Event, Ticket, Listing, Order, Payment, ReissueRequest, AuditLog
-│   │   ├── routes/   # auth, listings, orders, payments, tickets, events
-│   │   ├── tasks/    # Celery: process_reissue, send_notification
-│   │   └── services/ # StorageService (S3), OrganizerAdapter, audit
+│   │   ├── models/   # User, Event, Ticket, Listing, Order, Payment, ReissueRequest, AuditLog, PasswordResetToken
+│   │   ├── routes/   # auth, listings, orders, payments, tickets, events, wallet
+│   │   ├── tasks/    # Celery: process_reissue
+│   │   └── services/ # StorageService (MinIO/S3), OrganizerAdapter, email, audit
 │   └── tests/
-├── frontend/         # React + TypeScript + Tailwind
+├── frontend/         # React + TypeScript + Tailwind CSS
 │   └── src/
-│       ├── pages/    # Home, Listings, ListingDetail, Sell, Orders, OrderDetail, Login, Register
+│       ├── pages/    # Home, Listings, ListingDetail, Sell, Orders, OrderDetail, Login, Register, ForgotPassword, ResetPassword
 │       ├── api/      # axios-клиенты
 │       └── store/    # Zustand (auth)
-├── mock_organizer/   # Mock HTTP-сервер организатора
+├── mock_organizer/   # Mock HTTP-сервер организатора (порт 8001)
 └── docker-compose.yml
 ```
 
@@ -31,45 +31,40 @@ ticketswap/
 |------|-----------|
 | Backend | Flask 3.0, SQLAlchemy, PostgreSQL, Flask-JWT-Extended |
 | Async | Celery + Redis |
-| Платежи | Stripe Checkout |
-| Файлы | AWS S3 (presigned URL) |
+| Платежи | YooKassa (в dev-режиме — автоподтверждение без реальных денег) |
+| Файлы | MinIO (S3-совместимое, self-hosted), presigned URL |
 | Frontend | React 18, TypeScript, Vite, Tailwind CSS, Zustand |
+| Инфраструктура | Docker Compose (Podman-совместимо) |
 
 ## Быстрый старт
 
-### Локально
+### Docker / Podman
 
 ```bash
-# 1. Backend
-cd backend
-cp .env.example .env   # заполните ключи Stripe, AWS
-pip install -r requirements.txt
-flask --app run db upgrade
-python run.py
-
-# 2. Celery worker
-celery -A celery_worker.celery worker --loglevel=info
-
-# 3. Mock Organizer
-python mock_organizer/mock_organizer.py
-
-# 4. Frontend
-cd frontend
-pnpm install
-pnpm dev
-```
-
-### Docker
-
-```bash
-cp backend/.env.example backend/.env
 docker-compose up --build
+# или
+podman-compose up --build
 ```
 
 Сервисы:
 - Frontend: http://localhost:3000
 - Backend API: http://localhost:5000
 - Mock Organizer: http://localhost:8001
+- MinIO UI: http://localhost:9001 (admin / minioadmin)
+
+### Тестовые данные
+
+```bash
+docker exec ticketswap_backend_1 flask --app run seed
+```
+
+Создаёт 3 пользователей, 5 мероприятий, 10 билетов и 10 активных объявлений.
+
+| Email | Пароль | Роль |
+|-------|--------|------|
+| seller@test.com | password1 | продавец |
+| buyer@test.com | password1 | покупатель |
+| admin@test.com | password1 | админ |
 
 ## API (основные эндпоинты)
 
@@ -77,15 +72,18 @@ docker-compose up --build
 |-------|------|----------|
 | POST | `/auth/register` | Регистрация |
 | POST | `/auth/login` | Вход, получение JWT |
+| POST | `/auth/forgot-password` | Запрос сброса пароля |
+| POST | `/auth/reset-password` | Сброс пароля по токену |
 | GET | `/listings` | Список активных объявлений |
-| POST | `/listings` | Публикация объявления (FR1) |
-| POST | `/orders` | Создание заказа (FR3) |
-| POST | `/payments/create` | Создание Stripe Checkout |
-| POST | `/payments/webhook` | Stripe webhook → запуск reissue (FR4) |
-| GET | `/orders/{id}` | Статус заказа + reissue (FR7) |
+| POST | `/listings` | Публикация объявления |
+| POST | `/orders` | Создание заказа |
+| POST | `/payments/create` | Оплата (YooKassa / debug auto-confirm) |
+| GET | `/orders/{id}` | Статус заказа + переоформление |
 | GET | `/tickets/{id}/download` | Presigned URL на новый билет |
+| GET | `/wallet/balance` | Баланс продавца |
+| POST | `/wallet/withdraw` | Вывод средств (мин. 100 ₽) |
 
-## Жизненный цикл
+## Жизненный цикл сделки
 
 ```
 Listing: ACTIVE → BLOCKED → SOLD
@@ -94,6 +92,8 @@ Payment: CREATED → CONFIRMED
 Reissue: PENDING → SUCCESS / FAILED
 Ticket:  ACTIVE → REISSUED
 ```
+
+После успешного переоформления продавец получает на внутренний кошелёк сумму продажи за вычетом 5% комиссии платформы.
 
 ## Тесты
 
