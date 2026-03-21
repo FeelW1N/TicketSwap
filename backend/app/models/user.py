@@ -14,6 +14,7 @@ class User(db.Model):
     phone = db.Column(db.String(50))
     role = db.Column(db.String(20), nullable=False, default="user")  # user, admin
     is_active = db.Column(db.Boolean, default=True, nullable=False)
+    balance = db.Column(db.Numeric(12, 2), nullable=False, default=0)
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(
         db.DateTime(timezone=True),
@@ -40,5 +41,6 @@ class User(db.Model):
             "phone": self.phone,
             "role": self.role,
             "is_active": self.is_active,
+            "balance": float(self.balance) if self.balance is not None else 0.0,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

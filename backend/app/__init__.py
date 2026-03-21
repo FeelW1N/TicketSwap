@@ -18,13 +18,14 @@ def create_app(config_class=Config) -> Flask:
     app.extensions["celery"] = celery
 
     # Blueprints
-    from app.routes import auth_bp, listings_bp, orders_bp, payments_bp, tickets_bp, events_bp
+    from app.routes import auth_bp, listings_bp, orders_bp, payments_bp, tickets_bp, events_bp, wallet_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(listings_bp)
     app.register_blueprint(orders_bp)
     app.register_blueprint(payments_bp)
     app.register_blueprint(tickets_bp)
     app.register_blueprint(events_bp)
+    app.register_blueprint(wallet_bp)
 
     # Seed command
     from seed import register_seed_command

@@ -171,11 +171,26 @@ def yookassa_webhook():
 
 # ─── helpers ────────────────────────────────────────────────────────────────
 
+PLATFORM_FEE = 0.05  # 5% комиссия платформы
+
+
 def _confirm_payment(order: Order, payment: Payment, event_id: str) -> None:
-    """Помечает платёж подтверждённым и запускает переоформление."""
+    """Помечает платёж подтверждённым, начисляет продавцу и запускает переоформление."""
+    from app.models.user import User
+
     payment.provider_event_id = event_id
     payment.status = PaymentStatus.CONFIRMED
     order.status = OrderStatus.PAID
+
+    # Начисляем продавцу сумму за вычетом комиссии платформы
+    seller_id = order.listing.seller_user_id
+    seller = User.query.get(seller_id)
+    if seller:
+        payout = order.amount * (1 - PLATFORM_FEE)
+        seller.balance = (seller.balance or 0) + payout
+        log_event("WALLET_CREDITED", "user", str(seller.id),
+                  details={"order_id": str(order.id), "amount": float(payout)})
+
     db.session.commit()
     _trigger_reissue(order)
 
