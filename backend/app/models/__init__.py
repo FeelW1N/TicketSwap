@@ -6,6 +6,7 @@ from .order import Order
 from .payment import Payment
 from .reissue import ReissueRequest
 from .audit import AuditLog
+from .password_reset import PasswordResetToken
 
 __all__ = [
     "User",
@@ -16,4 +17,5 @@ __all__ = [
     "Payment",
     "ReissueRequest",
     "AuditLog",
+    "PasswordResetToken",
 ]
