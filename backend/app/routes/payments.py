@@ -171,7 +171,8 @@ def yookassa_webhook():
 
 # ─── helpers ────────────────────────────────────────────────────────────────
 
-PLATFORM_FEE = 0.05  # 5% комиссия платформы
+from decimal import Decimal
+PLATFORM_FEE = Decimal("0.05")  # 5% комиссия платформы
 
 
 def _confirm_payment(order: Order, payment: Payment, event_id: str) -> None:
