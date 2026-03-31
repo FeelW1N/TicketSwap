@@ -9,9 +9,13 @@ export default function ProfilePage() {
   const { user, fetchMe } = useAuthStore()
   const [listings, setListings] = useState<Listing[]>([])
   const [balance, setBalance] = useState<number>(0)
+  const [topupAmount, setTopupAmount] = useState('')
   const [withdrawAmount, setWithdrawAmount] = useState('')
+  const [topupError, setTopupError] = useState('')
+  const [topupSuccess, setTopupSuccess] = useState('')
   const [withdrawError, setWithdrawError] = useState('')
   const [withdrawSuccess, setWithdrawSuccess] = useState('')
+  const [toppingUp, setToppingUp] = useState(false)
   const [withdrawing, setWithdrawing] = useState(false)
   const [loading, setLoading] = useState(true)
 
@@ -55,6 +59,29 @@ export default function ProfilePage() {
       setWithdrawError(err?.response?.data?.error || 'Ошибка вывода')
     } finally {
       setWithdrawing(false)
+    }
+  }
+
+  const handleTopup = async () => {
+    const amount = parseFloat(topupAmount)
+    if (!amount || amount <= 0) {
+      setTopupError('Введите сумму')
+      return
+    }
+    setTopupError('')
+    setTopupSuccess('')
+    setToppingUp(true)
+    try {
+      const resp = await walletApi.topup(amount)
+      setBalance(resp.data.balance)
+      setTopupAmount('')
+      setTopupSuccess(`Баланс пополнен на ₽${amount.toLocaleString('ru-RU')}. Текущий баланс: ₽${resp.data.balance.toLocaleString('ru-RU', { minimumFractionDigits: 2 })}`)
+      await fetchMe()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      setTopupError(err?.response?.data?.error || 'Ошибка пополнения')
+    } finally {
+      setToppingUp(false)
     }
   }
 
@@ -102,8 +129,34 @@ export default function ProfilePage() {
           </div>
 
           <p className="text-xs text-gray-400 mb-4">
-            Средства зачисляются после успешной продажи за вычетом 5% комиссии платформы. Минимальная сумма вывода — 100 ₽.
+            Кошелёк используется и для покупки, и для вывода. Продавцу деньги зачисляются после успешного переоформления билета. Минимальная сумма вывода — 100 ₽.
           </p>
+
+          <div className="grid gap-3 sm:grid-cols-[1fr_auto] mb-4">
+            <input
+              type="number"
+              min="1"
+              step="1"
+              placeholder="Сумма пополнения"
+              value={topupAmount}
+              onChange={(e) => setTopupAmount(e.target.value)}
+              className="border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 bg-gray-50 focus:bg-white"
+            />
+            <button
+              onClick={handleTopup}
+              disabled={toppingUp}
+              className="px-5 py-2.5 bg-emerald-600 text-white text-sm font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+            >
+              {toppingUp ? 'Пополняем...' : 'Пополнить'}
+            </button>
+          </div>
+
+          {topupError && (
+            <p className="mb-2 text-xs text-red-500">{topupError}</p>
+          )}
+          {topupSuccess && (
+            <p className="mb-3 text-xs text-green-600">{topupSuccess}</p>
+          )}
 
           <div className="flex gap-3">
             <input

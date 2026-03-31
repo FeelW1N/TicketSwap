@@ -1,4 +1,5 @@
-"""GET /wallet/balance, POST /wallet/withdraw"""
+"""GET /wallet/balance, POST /wallet/topup, POST /wallet/withdraw"""
+
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.extensions import db
@@ -18,6 +19,41 @@ def get_balance():
     if not user:
         return jsonify({"error": "user not found"}), 404
     return jsonify({"balance": float(user.balance or 0)})
+
+
+@wallet_bp.post("/topup")
+@jwt_required()
+def topup():
+    """Учебное пополнение кошелька без реального платёжного провайдера."""
+    user_id = get_jwt_identity()
+    data = request.get_json(silent=True) or {}
+    amount = data.get("amount")
+
+    if amount is None or float(amount) <= 0:
+        return jsonify({"error": "amount must be positive"}), 400
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "user not found"}), 404
+
+    amount = float(amount)
+    user.balance = float(user.balance or 0) + amount
+    db.session.commit()
+
+    log_event(
+        "WALLET_TOPUP",
+        "user",
+        str(user.id),
+        details={"amount": amount, "balance": float(user.balance)},
+    )
+
+    return jsonify(
+        {
+            "status": "ok",
+            "topped_up": amount,
+            "balance": float(user.balance),
+        }
+    )
 
 
 @wallet_bp.post("/withdraw")
@@ -46,11 +82,17 @@ def withdraw():
     user.balance = float(user.balance) - amount
     db.session.commit()
 
-    log_event("WALLET_WITHDRAWN", "user", str(user.id),
-              details={"amount": amount, "remaining": float(user.balance)})
+    log_event(
+        "WALLET_WITHDRAWN",
+        "user",
+        str(user.id),
+        details={"amount": amount, "remaining": float(user.balance)},
+    )
 
-    return jsonify({
-        "status": "ok",
-        "withdrawn": amount,
-        "balance": float(user.balance),
-    })
+    return jsonify(
+        {
+            "status": "ok",
+            "withdrawn": amount,
+            "balance": float(user.balance),
+        }
+    )

@@ -64,6 +64,7 @@ services:
       S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
       DEBUG: "true"
       FRONTEND_URL: "http://localhost:3000"
+      ORGANIZER_API_BASE_URL: http://mock_organizer:8001
     depends_on:
       db:
         condition: service_healthy
@@ -71,6 +72,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      mock_organizer:
+        condition: service_started
     volumes:
       - ./backend:/app
 
@@ -91,6 +94,7 @@ services:
       S3_ENDPOINT_URL: http://minio:9000
       S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
       DEBUG: "true"
+      ORGANIZER_API_BASE_URL: http://mock_organizer:8001
     depends_on:
       db:
         condition: service_healthy
@@ -98,6 +102,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      mock_organizer:
+        condition: service_started
     volumes:
       - ./backend:/app
 

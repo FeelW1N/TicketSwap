@@ -32,7 +32,7 @@ const features = [
       </svg>
     ),
     title: 'Безопасная оплата',
-    desc: 'Оплата через Stripe — средства переводятся только после получения нового билета',
+    desc: 'Покупатель оплачивает заказ из внутреннего кошелька, а деньги продавцу зачисляются после успешного переоформления',
     color: 'text-emerald-500 bg-emerald-50',
   },
 ]
@@ -98,8 +98,8 @@ export default function HomePage() {
             <div className="flex flex-col sm:flex-row gap-6 justify-center mt-12 text-center">
               {[
                 { value: '100%', label: 'Верифицированные билеты' },
-                { value: '0₽', label: 'Комиссия для продавца' },
-                { value: 'Stripe', label: 'Безопасная оплата' },
+                { value: '5%', label: 'Комиссия платформы' },
+                { value: 'Кошелёк', label: 'Простая оплата' },
               ].map((stat) => (
                 <div key={stat.label} className="text-white/80">
                   <p className="text-2xl font-bold text-white">{stat.value}</p>

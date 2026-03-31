@@ -1,5 +1,7 @@
 """POST /listings, GET /listings, GET /listings/{id}, DELETE /listings/{id}"""
+
 import logging
+from datetime import datetime
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.extensions import db
@@ -23,6 +25,80 @@ def _allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def _validation_error_response(validation):
+    error_map = {
+        "EVENT_NOT_FOUND": (404, "selected event was not found at organizer"),
+        "EVENT_MISMATCH": (422, "ticket does not belong to selected event"),
+        "TICKET_NOT_FOUND": (422, "ticket was not found at selected organizer"),
+        "VALIDATION_UNAVAILABLE": (
+            502,
+            "organizer validation is temporarily unavailable",
+        ),
+    }
+    status, message = error_map.get(
+        validation.error_code,
+        (422, "ticket validation failed"),
+    )
+    payload = {"error": message}
+    if validation.error_code:
+        payload["code"] = validation.error_code
+    if validation.error:
+        payload["detail"] = validation.error
+    return jsonify(payload), status
+
+
+def _parse_event_date(value):
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value)
+    return value
+
+
+def _upsert_event_from_organizer(
+    organizer_id: str, external_event_id: str, organizer_event: dict | None
+) -> Event | None:
+    """Локальный Event — это кэш внешнего события организатора.
+
+    Источник истины — organizer API. В нашей БД событие хранится для каталога,
+    поиска и связи с листингами, поэтому при публикации мы не только создаём
+    локальную запись, но и синхронизируем её с внешними данными.
+    """
+    event = Event.query.filter_by(
+        organizer_id=organizer_id,
+        external_event_id=external_event_id,
+    ).first()
+
+    if event and organizer_event:
+        event.title = organizer_event.get("title") or event.title
+        event.description = organizer_event.get("description")
+        event.venue = organizer_event.get("venue")
+        event.city = organizer_event.get("city")
+        event.event_date = _parse_event_date(organizer_event.get("event_date"))
+        event.category = organizer_event.get("category")
+        event.image_url = organizer_event.get("image_url")
+        db.session.flush()
+        return event
+
+    if event or not organizer_event:
+        return event
+
+    event = Event(
+        title=organizer_event.get("title") or "Мероприятие",
+        description=organizer_event.get("description"),
+        venue=organizer_event.get("venue"),
+        city=organizer_event.get("city"),
+        event_date=_parse_event_date(organizer_event.get("event_date")),
+        organizer_id=organizer_id,
+        external_event_id=external_event_id,
+        category=organizer_event.get("category"),
+        image_url=organizer_event.get("image_url"),
+    )
+    db.session.add(event)
+    db.session.flush()
+    return event
+
+
 @listings_bp.post("")
 @jwt_required()
 def create_listing():
@@ -41,9 +117,12 @@ def create_listing():
         file = None
 
     # Валидация обязательных полей (price проверяем отдельно, т.к. 0 — falsy)
-    for field in ["event_id", "external_ticket_id", "organizer_id"]:
+    for field in ["external_ticket_id", "organizer_id"]:
         if not data.get(field):
             return jsonify({"error": f"{field} is required"}), 400
+
+    if not data.get("event_id") and not data.get("external_event_id"):
+        return jsonify({"error": "external_event_id is required"}), 400
 
     if data.get("price") is None:
         return jsonify({"error": "price is required"}), 400
@@ -56,9 +135,31 @@ def create_listing():
     if price <= 0:
         return jsonify({"error": "price must be positive"}), 400
 
-    event = Event.query.get(data["event_id"])
-    if not event:
-        return jsonify({"error": "event not found"}), 404
+    event = None
+    external_event_id = data.get("external_event_id")
+
+    if data.get("event_id"):
+        # `event_id` оставлен как legacy/internal путь для совместимости с
+        # существующими тестами и возможными внутренними скриптами.
+        # Публичный пользовательский сценарий должен идти через organizer_id +
+        # external_event_id.
+        event = Event.query.get(data["event_id"])
+        if not event:
+            return jsonify({"error": "event not found"}), 404
+        if event.organizer_id != data["organizer_id"]:
+            return jsonify(
+                {"error": "selected event belongs to a different organizer"}
+            ), 422
+        external_event_id = event.external_event_id or external_event_id
+        if not external_event_id:
+            return jsonify(
+                {"error": "selected local event is not linked to organizer catalog"}
+            ), 422
+    elif external_event_id:
+        event = Event.query.filter_by(
+            organizer_id=data["organizer_id"],
+            external_event_id=external_event_id,
+        ).first()
 
     # Проверка: нет ли уже такого билета в системе
     existing_ticket = Ticket.query.filter_by(
@@ -72,26 +173,36 @@ def create_listing():
     adapter = get_organizer_adapter()
     validation = adapter.validate_ticket(
         organizer_id=data["organizer_id"],
+        external_event_id=external_event_id,
         external_ticket_id=data["external_ticket_id"],
         seller_user_id=user_id,
     )
     if not validation.is_valid:
-        return jsonify({"error": "ticket validation failed", "detail": validation.error}), 422
+        return _validation_error_response(validation)
+
+    if not event:
+        event = _upsert_event_from_organizer(
+            data["organizer_id"], external_event_id, validation.event
+        )
+    if not event:
+        return jsonify({"error": "event not found at organizer"}), 404
 
     # Проверка наценки: не более 20% от исходной цены (в DEBUG пропускаем)
     if validation.face_value and not current_app.config.get("DEBUG"):
         max_price = validation.face_value * (1 + Config.MAX_RESALE_MARKUP_PERCENT / 100)
         if price > max_price:
-            return jsonify({
-                "error": f"price exceeds allowed markup (max {max_price:.2f})"
-            }), 422
+            return jsonify(
+                {"error": f"price exceeds allowed markup (max {max_price:.2f})"}
+            ), 422
 
     # Загрузка файла в S3
     s3_key = None
     if file and _allowed_file(file.filename):
         file_bytes = file.read()
         if len(file_bytes) > MAX_FILE_BYTES:
-            return jsonify({"error": f"file too large (max {Config.MAX_FILE_SIZE_MB}MB)"}), 413
+            return jsonify(
+                {"error": f"file too large (max {Config.MAX_FILE_SIZE_MB}MB)"}
+            ), 413
         s3_key = storage_service.upload_ticket_file(file_bytes, file.filename, user_id)
 
     # Создание сущностей
@@ -99,7 +210,7 @@ def create_listing():
         external_ticket_id=data["external_ticket_id"],
         organizer_id=data["organizer_id"],
         owner_user_id=user_id,
-        event_id=data["event_id"],
+        event_id=event.id,
         status=TicketStatus.ACTIVE,
         seat_info=data.get("seat_info"),
         face_value=validation.face_value or data.get("face_value"),
@@ -110,7 +221,7 @@ def create_listing():
 
     listing = Listing(
         ticket_id=ticket.id,
-        event_id=data["event_id"],
+        event_id=event.id,
         seller_user_id=user_id,
         price=price,
         description=data.get("description"),
@@ -119,8 +230,17 @@ def create_listing():
     db.session.add(listing)
     db.session.commit()
 
-    log_event("LISTING_CREATED", "listing", str(listing.id), user_id,
-              {"price": price, "event_id": data["event_id"]})
+    log_event(
+        "LISTING_CREATED",
+        "listing",
+        str(listing.id),
+        user_id,
+        {
+            "price": price,
+            "event_id": str(event.id),
+            "external_event_id": external_event_id,
+        },
+    )
 
     return jsonify(listing.to_dict(include_event=True, include_ticket=True)), 201
 
@@ -137,6 +257,7 @@ def list_listings():
       page, per_page
     """
     from app.models.event import Event as EventModel
+
     page = request.args.get("page", 1, type=int)
     per_page = min(request.args.get("per_page", 12, type=int), 100)
     event_id = request.args.get("event_id")
@@ -145,8 +266,9 @@ def list_listings():
     category = request.args.get("category", "").strip()
     sort = request.args.get("sort", "newest")
 
-    query = Listing.query.join(EventModel, Listing.event_id == EventModel.id)\
-        .filter(Listing.status == ListingStatus.ACTIVE)
+    query = Listing.query.join(EventModel, Listing.event_id == EventModel.id).filter(
+        Listing.status == ListingStatus.ACTIVE
+    )
 
     if event_id:
         query = query.filter(Listing.event_id == event_id)
@@ -164,21 +286,26 @@ def list_listings():
         query = query.filter(EventModel.category == category)
 
     sort_map = {
-        "price_asc":  Listing.price.asc(),
+        "price_asc": Listing.price.asc(),
         "price_desc": Listing.price.desc(),
-        "date_asc":   EventModel.event_date.asc(),
-        "date_desc":  EventModel.event_date.desc(),
-        "newest":     Listing.created_at.desc(),
+        "date_asc": EventModel.event_date.asc(),
+        "date_desc": EventModel.event_date.desc(),
+        "newest": Listing.created_at.desc(),
     }
     query = query.order_by(sort_map.get(sort, Listing.created_at.desc()))
 
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-    return jsonify({
-        "items": [l.to_dict(include_event=True, include_ticket=True) for l in pagination.items],
-        "total": pagination.total,
-        "page": page,
-        "pages": pagination.pages,
-    })
+    return jsonify(
+        {
+            "items": [
+                l.to_dict(include_event=True, include_ticket=True)
+                for l in pagination.items
+            ],
+            "total": pagination.total,
+            "page": page,
+            "pages": pagination.pages,
+        }
+    )
 
 
 @listings_bp.get("/<uuid:listing_id>")

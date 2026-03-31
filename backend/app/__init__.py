@@ -14,21 +14,34 @@ def create_app(config_class=Config) -> Flask:
 
     # Celery
     from app.tasks.celery_app import make_celery
+
     celery = make_celery(app)
     app.extensions["celery"] = celery
 
     # Blueprints
-    from app.routes import auth_bp, listings_bp, orders_bp, payments_bp, tickets_bp, events_bp, wallet_bp
+    from app.routes import (
+        auth_bp,
+        listings_bp,
+        orders_bp,
+        payments_bp,
+        tickets_bp,
+        events_bp,
+        organizers_bp,
+        wallet_bp,
+    )
+
     app.register_blueprint(auth_bp)
     app.register_blueprint(listings_bp)
     app.register_blueprint(orders_bp)
     app.register_blueprint(payments_bp)
     app.register_blueprint(tickets_bp)
     app.register_blueprint(events_bp)
+    app.register_blueprint(organizers_bp)
     app.register_blueprint(wallet_bp)
 
     # Seed command
     from seed import register_seed_command
+
     register_seed_command(app)
 
     # Health check

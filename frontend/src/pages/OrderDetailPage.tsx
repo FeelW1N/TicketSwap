@@ -3,12 +3,16 @@ import { useParams, Link } from 'react-router-dom'
 import { ordersApi } from '../api/orders'
 import type { Order } from '../types'
 import StatusBadge from '../components/StatusBadge'
+import { useAuthStore } from '../store/authStore'
 
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const { fetchMe } = useAuthStore()
   const [order, setOrder] = useState<Order | null>(null)
   const [loading, setLoading] = useState(true)
   const [downloadUrl, setDownloadUrl] = useState('')
+  const [payError, setPayError] = useState('')
+  const [paying, setPaying] = useState(false)
 
   const fetchOrder = useCallback(() => {
     if (!id) return
@@ -31,6 +35,22 @@ export default function OrderDetailPage() {
       window.open(resp.data.download_url, '_blank')
     } catch (e) {
       console.error(e)
+    }
+  }
+
+  const handlePay = async () => {
+    if (!order) return
+    setPayError('')
+    setPaying(true)
+    try {
+      await ordersApi.createPayment(order.id)
+      await fetchMe()
+      fetchOrder()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      setPayError(err?.response?.data?.error || 'Не удалось оплатить заказ')
+    } finally {
+      setPaying(false)
     }
   }
 
@@ -96,24 +116,28 @@ export default function OrderDetailPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
               </svg>
             }>
-              <div className="flex items-center justify-between">
-                <div>
-                  <StatusBadge status={payment.status} />
-                  <p className="text-sm text-gray-600 mt-2">
-                    Сумма: <strong className="text-gray-900">{payment.amount.toLocaleString('ru-RU')} ₽</strong>
-                  </p>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <StatusBadge status={payment.status} />
+                    <p className="text-sm text-gray-600 mt-2">
+                      Сумма: <strong className="text-gray-900">{payment.amount.toLocaleString('ru-RU')} ₽</strong>
+                    </p>
+                  </div>
+                  {payment.status === 'CREATED' && (
+                    <button
+                      onClick={handlePay}
+                      disabled={paying}
+                      className="bg-brand-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-brand-700 disabled:opacity-50 transition-colors shadow-sm"
+                    >
+                      {paying ? 'Оплачиваем...' : 'Оплатить с кошелька'}
+                    </button>
+                  )}
                 </div>
-                {payment.checkout_url && payment.status === 'CREATED' && (
-                  <a
-                    href={payment.checkout_url}
-                    className="bg-brand-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-brand-700 transition-colors shadow-sm"
-                  >
-                    Оплатить
-                  </a>
+                {payError && (
+                  <p className="text-sm text-red-600 mt-3">{payError}</p>
                 )}
-              </div>
-            </Section>
-          )}
+              </Section>
+            )}
 
           {/* Reissue */}
           {reissue && (
@@ -170,6 +194,7 @@ export default function OrderDetailPage() {
                   {reissue.error_message && (
                     <p className="text-xs text-red-600 mt-0.5">{reissue.error_code} — {reissue.error_message}</p>
                   )}
+                  <p className="text-xs text-red-600 mt-1">Деньги будут возвращены на ваш внутренний кошелёк.</p>
                 </div>
               )}
             </Section>

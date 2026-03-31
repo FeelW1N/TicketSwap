@@ -3,13 +3,15 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useNavigate } from 'react-router-dom'
 import { listingsApi } from '../api/listings'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { organizersApi } from '../api/organizers'
+import type { Organizer, OrganizerEvent } from '../types'
 
 const schema = z.object({
-  event_id:           z.string().uuid('Введите корректный ID события'),
+  organizer_id:       z.string().min(1, 'Выберите организатора'),
+  external_event_id:  z.string().min(1, 'Выберите мероприятие'),
   price:              z.coerce.number().positive('Цена должна быть положительной'),
   external_ticket_id: z.string().min(1, 'Укажите номер билета'),
-  organizer_id:       z.string().min(1, 'Укажите ID организатора'),
   seat_info:          z.string().optional(),
   description:        z.string().optional(),
 })
@@ -37,10 +39,41 @@ export default function SellPage() {
   const navigate = useNavigate()
   const [serverError, setServerError] = useState('')
   const [ticketFile, setTicketFile] = useState<File | null>(null)
+  const [organizers, setOrganizers] = useState<Organizer[]>([])
+  const [organizerEvents, setOrganizerEvents] = useState<OrganizerEvent[]>([])
+  const [loadingOrganizers, setLoadingOrganizers] = useState(true)
+  const [loadingEvents, setLoadingEvents] = useState(false)
 
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormData>({
+  const { register, watch, setValue, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema),
   })
+
+  const organizerId = watch('organizer_id')
+  const externalEventId = watch('external_event_id')
+  const selectedEvent = organizerEvents.find((event) => event.id === externalEventId)
+
+  useEffect(() => {
+    organizersApi.list()
+      .then((resp) => setOrganizers(resp.data.items))
+      .catch(() => setServerError('Не удалось загрузить список организаторов'))
+      .finally(() => setLoadingOrganizers(false))
+  }, [])
+
+  useEffect(() => {
+    if (!organizerId) {
+      setOrganizerEvents([])
+      setValue('external_event_id', '')
+      return
+    }
+
+    setLoadingEvents(true)
+    setOrganizerEvents([])
+    setValue('external_event_id', '')
+    organizersApi.listEvents(organizerId)
+      .then((resp) => setOrganizerEvents(resp.data.items))
+      .catch(() => setServerError('Не удалось загрузить мероприятия организатора'))
+      .finally(() => setLoadingEvents(false))
+  }, [organizerId, setValue])
 
   const onSubmit = async (data: FormData) => {
     setServerError('')
@@ -54,8 +87,17 @@ export default function SellPage() {
       const resp = await listingsApi.create(formData)
       navigate(`/listings/${resp.data.id}`)
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { error?: string } } }
-      setServerError(err?.response?.data?.error || 'Ошибка при создании объявления')
+      const err = e as { response?: { data?: { error?: string; code?: string } } }
+      const code = err?.response?.data?.code
+      const fallback = err?.response?.data?.error || 'Ошибка при создании объявления'
+      const friendlyMessage = code === 'TICKET_NOT_FOUND'
+        ? 'Такой номер билета не найден у выбранного организатора. Используйте один из demo-номеров ниже или проверьте ввод.'
+        : code === 'EVENT_MISMATCH'
+          ? 'Этот билет не относится к выбранному мероприятию. Проверьте выбор мероприятия и номер билета.'
+          : code === 'EVENT_NOT_FOUND'
+            ? 'Выбранное мероприятие не найдено у организатора. Попробуйте выбрать его заново.'
+            : fallback
+      setServerError(friendlyMessage)
     }
   }
 
@@ -67,35 +109,102 @@ export default function SellPage() {
         <p className="text-sm text-gray-500 mt-1">Заполните данные для публикации объявления</p>
       </div>
 
+      <div className="mb-4 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-4">
+        <p className="text-sm font-semibold text-amber-900 mb-1">Демо-режим</p>
+        <p className="text-sm text-amber-800 leading-relaxed">
+          Выберите организатора и мероприятие, а затем используйте один из предложенных тестовых номеров билетов
+          или свой demo-номер из mock organizer catalog.
+        </p>
+      </div>
+
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="h-1.5 bg-gradient-to-r from-brand-500 via-brand-400 to-violet-400" />
 
         <div className="p-7">
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-            <Field label="ID события" error={errors.event_id?.message}>
+            <Field label="Организатор" error={errors.organizer_id?.message}>
+              <select
+                {...register('organizer_id')}
+                className={inputCls(!!errors.organizer_id)}
+                defaultValue=""
+                disabled={loadingOrganizers}
+              >
+                <option value="">{loadingOrganizers ? 'Загружаем организаторов...' : 'Выберите организатора'}</option>
+                {organizers.map((organizer) => (
+                  <option key={organizer.id} value={organizer.id}>{organizer.name}</option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="Мероприятие" error={errors.external_event_id?.message}>
+              <select
+                {...register('external_event_id')}
+                className={inputCls(!!errors.external_event_id)}
+                defaultValue=""
+                disabled={!organizerId || loadingEvents}
+              >
+                <option value="">
+                  {!organizerId
+                    ? 'Сначала выберите организатора'
+                    : loadingEvents
+                      ? 'Загружаем мероприятия...'
+                      : 'Выберите мероприятие'}
+                </option>
+                {organizerEvents.map((event) => (
+                  <option key={event.id} value={event.id}>
+                    {event.title} · {event.city} · {new Date(event.event_date).toLocaleDateString('ru-RU')}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="Номер билета" error={errors.external_ticket_id?.message}>
               <input
-                {...register('event_id')}
-                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                className={inputCls(!!errors.event_id)}
+                {...register('external_ticket_id')}
+                placeholder={selectedEvent?.sample_ticket_ids?.[0] ? `Например, ${selectedEvent.sample_ticket_ids[0]}` : 'Введите номер билета'}
+                className={inputCls(!!errors.external_ticket_id)}
               />
             </Field>
 
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="ID организатора" error={errors.organizer_id?.message}>
-                <input
-                  {...register('organizer_id')}
-                  placeholder="org-1"
-                  className={inputCls(!!errors.organizer_id)}
-                />
-              </Field>
-              <Field label="Номер билета" error={errors.external_ticket_id?.message}>
-                <input
-                  {...register('external_ticket_id')}
-                  placeholder="TKT-12345"
-                  className={inputCls(!!errors.external_ticket_id)}
-                />
-              </Field>
-            </div>
+            {selectedEvent && (
+              <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-4 space-y-2">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">{selectedEvent.title}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {selectedEvent.city} · {selectedEvent.venue} · {new Date(selectedEvent.event_date).toLocaleString('ru-RU')}
+                    </p>
+                  </div>
+                  {selectedEvent.category && (
+                    <span className="text-[11px] uppercase tracking-wide text-brand-700 bg-brand-100 rounded-full px-2.5 py-1 font-semibold">
+                      {selectedEvent.category}
+                    </span>
+                  )}
+                </div>
+
+                {selectedEvent.description && (
+                  <p className="text-sm text-gray-600">{selectedEvent.description}</p>
+                )}
+
+                {!!selectedEvent.sample_ticket_ids?.length && (
+                  <div className="pt-1">
+                    <p className="text-xs font-medium text-gray-500 mb-2">Примеры тестовых номеров билетов для демо-режима:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedEvent.sample_ticket_ids.map((ticketId) => (
+                        <button
+                          key={ticketId}
+                          type="button"
+                          onClick={() => setValue('external_ticket_id', ticketId, { shouldValidate: true })}
+                          className="text-xs font-mono px-2.5 py-1.5 rounded-lg border border-brand-200 bg-white text-brand-700 hover:bg-brand-50 transition-colors"
+                        >
+                          {ticketId}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <Field label="Цена продажи (₽)" error={errors.price?.message}>
               <div className="relative">
@@ -188,8 +297,9 @@ export default function SellPage() {
           </svg>
         </div>
         <p className="text-sm text-brand-700 leading-relaxed">
-          Перед публикацией система верифицирует билет у организатора и проверит,
-          что цена не превышает исходную <strong>более чем на 20%</strong>.
+          Сначала выберите организатора и мероприятие, а затем укажите номер билета с вашего исходного билета.
+          Перед публикацией система верифицирует билет у организатора и проверит, что цена не превышает исходную
+          <strong> более чем на 20%</strong>.
         </p>
       </div>
     </div>

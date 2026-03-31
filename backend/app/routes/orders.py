@@ -1,4 +1,5 @@
 """POST /orders, GET /orders/{id}, GET /orders (мои заказы)"""
+
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.extensions import db
@@ -45,8 +46,13 @@ def create_order():
     db.session.add(order)
     db.session.commit()
 
-    log_event("ORDER_CREATED", "order", str(order.id), user_id,
-              {"listing_id": str(listing.id), "amount": float(listing.price)})
+    log_event(
+        "ORDER_CREATED",
+        "order",
+        str(order.id),
+        user_id,
+        {"listing_id": str(listing.id), "amount": float(listing.price)},
+    )
 
     return jsonify(order.to_dict()), 201
 
@@ -64,12 +70,14 @@ def list_my_orders():
         .order_by(Order.created_at.desc())
         .paginate(page=page, per_page=per_page, error_out=False)
     )
-    return jsonify({
-        "items": [o.to_dict() for o in pagination.items],
-        "total": pagination.total,
-        "page": page,
-        "pages": pagination.pages,
-    })
+    return jsonify(
+        {
+            "items": [o.to_dict() for o in pagination.items],
+            "total": pagination.total,
+            "page": page,
+            "pages": pagination.pages,
+        }
+    )
 
 
 @orders_bp.get("/<uuid:order_id>")

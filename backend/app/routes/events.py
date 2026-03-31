@@ -1,4 +1,10 @@
-"""GET /events, GET /events/{id}, POST /events"""
+"""GET /events, GET /events/{id}, POST /events.
+
+`Event` в этой системе — локальное зеркало внешнего события организатора.
+Основной пользовательский поток должен получать мероприятия через `/organizers`.
+Маршруты `/events` оставлены для локального каталога и совместимости.
+"""
+
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.extensions import db
@@ -9,6 +15,7 @@ events_bp = Blueprint("events", __name__, url_prefix="/events")
 
 @events_bp.get("")
 def list_events():
+    """Локальный каталог событий, уже известных нашей платформе."""
     page = request.args.get("page", 1, type=int)
     per_page = min(request.args.get("per_page", 20, type=int), 100)
     q = request.args.get("q", "")
@@ -20,17 +27,22 @@ def list_events():
     if city:
         query = query.filter(Event.city.ilike(f"%{city}%"))
 
-    pagination = query.order_by(Event.event_date).paginate(page=page, per_page=per_page, error_out=False)
-    return jsonify({
-        "items": [e.to_dict() for e in pagination.items],
-        "total": pagination.total,
-        "page": page,
-        "pages": pagination.pages,
-    })
+    pagination = query.order_by(Event.event_date).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+    return jsonify(
+        {
+            "items": [e.to_dict() for e in pagination.items],
+            "total": pagination.total,
+            "page": page,
+            "pages": pagination.pages,
+        }
+    )
 
 
 @events_bp.get("/<uuid:event_id>")
 def get_event(event_id):
+    """Возвращает локальную cached-копию события."""
     event = Event.query.get_or_404(str(event_id))
     return jsonify(event.to_dict())
 
@@ -38,6 +50,7 @@ def get_event(event_id):
 @events_bp.post("")
 @jwt_required()
 def create_event():
+    """Legacy/internal endpoint для ручного создания локального события."""
     data = request.get_json(silent=True) or {}
     required = ["title", "event_date", "organizer_id"]
     for field in required:
