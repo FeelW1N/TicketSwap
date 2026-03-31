@@ -112,12 +112,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <span className="text-sm font-semibold text-gray-700">TicketSwap</span>
             </div>
             <p className="text-xs text-gray-400 text-center">
-              © 2026 TicketSwap — атомарная передача прав на билет. НИУ ВШЭ, БПМИ237.
+              2026 TicketSwap — безопасная передача прав на билет.
             </p>
-            <div className="flex items-center gap-1 text-xs text-gray-400">
-              <span className="w-2 h-2 rounded-full bg-green-400 inline-block"></span>
-              Защищено · YooKassa · MinIO
-            </div>
+              <div className="flex items-center gap-1 text-xs text-gray-400">
+                <span className="w-2 h-2 rounded-full bg-green-400 inline-block"></span>
+                Кошелёк · MinIO · Переоформление
+              </div>
           </div>
         </div>
       </footer>

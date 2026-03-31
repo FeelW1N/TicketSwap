@@ -31,7 +31,7 @@ ticketswap/
 |------|-----------|
 | Backend | Flask 3.0, SQLAlchemy, PostgreSQL, Flask-JWT-Extended |
 | Async | Celery + Redis |
-| Платежи | YooKassa (в dev-режиме — автоподтверждение без реальных денег) |
+| Платежи | Внутренний кошелёк с учебным пополнением без реальных денег |
 | Файлы | MinIO (S3-совместимое, self-hosted), presigned URL |
 | Frontend | React 18, TypeScript, Vite, Tailwind CSS, Zustand |
 | Инфраструктура | Docker Compose (Podman-совместимо) |
@@ -41,7 +41,8 @@ ticketswap/
 ### Docker / Podman
 
 ```bash
-docker-compose up --build
+cp backend/.env.example backend/.env
+docker compose up --build
 # или
 podman-compose up --build
 ```
@@ -55,16 +56,36 @@ podman-compose up --build
 ### Тестовые данные
 
 ```bash
-docker exec ticketswap_backend_1 flask --app run seed
+docker compose run --rm backend flask --app run seed
 ```
 
-Создаёт 3 пользователей, 5 мероприятий, 10 билетов и 10 активных объявлений.
+Создаёт 3 пользователей и синхронизирует demo-данные под текущий каталог mock organizer:
+
+- 6 мероприятий
+- 15 demo-билетов
+- 6 активных объявлений
+- 9 свободных demo-билетов для ручного сценария продажи
 
 | Email | Пароль | Роль |
 |-------|--------|------|
 | seller@test.com | password1 | продавец |
 | buyer@test.com | password1 | покупатель |
 | admin@test.com | password1 | админ |
+
+### Demo flow продажи
+
+Публикация объявления теперь идёт через пользовательский flow:
+
+1. выбрать организатора;
+2. выбрать мероприятие;
+3. указать номер билета;
+4. задать цену и опубликовать объявление.
+
+Примеры demo-номеров для ручной проверки формы `Продать билет`:
+
+- `RedKassa` -> `Би-2: Горизонт событий` -> `RK-BI2-1002`
+- `Concert.ru` -> `Imagine Dragons Live in Moscow` -> `CR-ID-3002`
+- `Qtickets` -> `ЦСКА vs Спартак` -> `QT-CSKA-4002`
 
 ## API (основные эндпоинты)
 
@@ -74,13 +95,16 @@ docker exec ticketswap_backend_1 flask --app run seed
 | POST | `/auth/login` | Вход, получение JWT |
 | POST | `/auth/forgot-password` | Запрос сброса пароля |
 | POST | `/auth/reset-password` | Сброс пароля по токену |
+| GET | `/organizers` | Список доступных организаторов |
+| GET | `/organizers/{id}/events` | Список мероприятий организатора |
 | GET | `/listings` | Список активных объявлений |
 | POST | `/listings` | Публикация объявления |
 | POST | `/orders` | Создание заказа |
-| POST | `/payments/create` | Оплата (YooKassa / debug auto-confirm) |
+| POST | `/payments/create` | Оплата заказа из внутреннего кошелька |
 | GET | `/orders/{id}` | Статус заказа + переоформление |
 | GET | `/tickets/{id}/download` | Presigned URL на новый билет |
-| GET | `/wallet/balance` | Баланс продавца |
+| GET | `/wallet/balance` | Текущий баланс кошелька |
+| POST | `/wallet/topup` | Учебное пополнение кошелька |
 | POST | `/wallet/withdraw` | Вывод средств (мин. 100 ₽) |
 
 ## Жизненный цикл сделки
@@ -93,11 +117,20 @@ Reissue: PENDING → SUCCESS / FAILED
 Ticket:  ACTIVE → REISSUED
 ```
 
-После успешного переоформления продавец получает на внутренний кошелёк сумму продажи за вычетом 5% комиссии платформы.
+Покупатель оплачивает заказ из внутреннего кошелька. После успешного переоформления продавец получает на внутренний кошелёк сумму продажи за вычетом 5% комиссии платформы. Если переоформление не удалось, деньги возвращаются покупателю.
+
+## Organizer model
+
+Источник истины для мероприятий и проверки билета — organizer API.
+
+- `/organizers` и `/organizers/{id}/events` отдают внешний каталог;
+- локальная таблица `events` хранит cached-копии событий, уже известных платформе;
+- при публикации объявления backend сам находит или создаёт локальный `Event` по данным организатора.
+
+Маршрут `POST /events` оставлен как legacy/internal endpoint и не нужен обычному пользователю.
 
 ## Тесты
 
 ```bash
-cd backend
-pytest tests/ -v
+docker compose run --rm backend pytest tests -q
 ```

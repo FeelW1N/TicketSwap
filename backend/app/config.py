@@ -22,9 +22,11 @@ class Config:
     # Redis / Celery
     REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
     CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
-    CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
+    CELERY_RESULT_BACKEND = os.environ.get(
+        "CELERY_RESULT_BACKEND", "redis://localhost:6379/0"
+    )
 
-    # YooKassa (в DEBUG=true оплата автоматическая — реальные ключи не нужны)
+    # Legacy-переменные платёжного провайдера оставлены для совместимости конфигов.
     YOOKASSA_SHOP_ID = os.environ.get("YOOKASSA_SHOP_ID", "debug-shop-id")
     YOOKASSA_SECRET_KEY = os.environ.get("YOOKASSA_SECRET_KEY", "debug-secret-key")
 
@@ -37,7 +39,9 @@ class Config:
     # MinIO: внутренний URL (для backend/celery внутри Docker-сети)
     S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL", "http://localhost:9000")
     # MinIO: публичный URL (для presigned-ссылок, открываемых браузером)
-    S3_PUBLIC_ENDPOINT_URL = os.environ.get("S3_PUBLIC_ENDPOINT_URL", "http://localhost:9000")
+    S3_PUBLIC_ENDPOINT_URL = os.environ.get(
+        "S3_PUBLIC_ENDPOINT_URL", "http://localhost:9000"
+    )
 
     # Email (SMTP). Если не задан SMTP_HOST — письма только в лог (dev-режим).
     SMTP_HOST = os.environ.get("SMTP_HOST")
@@ -47,7 +51,9 @@ class Config:
     SMTP_FROM = os.environ.get("SMTP_FROM", "noreply@ticketswap.ru")
 
     # Organizer API (mock)
-    ORGANIZER_API_BASE_URL = os.environ.get("ORGANIZER_API_BASE_URL", "http://localhost:8001")
+    ORGANIZER_API_BASE_URL = os.environ.get(
+        "ORGANIZER_API_BASE_URL", "http://localhost:8001"
+    )
     ORGANIZER_API_KEY = os.environ.get("ORGANIZER_API_KEY", "mock-api-key")
 
     # Business rules

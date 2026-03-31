@@ -14,16 +14,24 @@ class Payment(db.Model):
     __tablename__ = "payments"
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    order_id = db.Column(db.String(36), db.ForeignKey("orders.id"), nullable=False, unique=True)
-    provider = db.Column(db.String(50), nullable=False, default="stripe")
-    provider_payment_id = db.Column(db.String(255), unique=True)  # Stripe PaymentIntent ID
-    provider_event_id = db.Column(db.String(255), unique=True)    # Stripe event ID (для дедупликации webhook)
+    order_id = db.Column(
+        db.String(36), db.ForeignKey("orders.id"), nullable=False, unique=True
+    )
+    provider = db.Column(db.String(50), nullable=False, default="wallet")
+    provider_payment_id = db.Column(
+        db.String(255), unique=True
+    )  # ID операции во внутреннем кошельке
+    provider_event_id = db.Column(
+        db.String(255), unique=True
+    )  # ID события для идемпотентности
     amount = db.Column(db.Numeric(10, 2), nullable=False)
     currency = db.Column(db.String(10), nullable=False, default="rub")
     status = db.Column(db.String(20), nullable=False, default=PaymentStatus.CREATED)
-    checkout_url = db.Column(db.String(1000))  # Stripe Checkout URL
+    checkout_url = db.Column(db.String(1000))  # legacy-поле, больше не используется
     error_message = db.Column(db.Text)
-    created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(
+        db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
     updated_at = db.Column(
         db.DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

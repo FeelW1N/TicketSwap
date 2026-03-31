@@ -50,6 +50,12 @@ export default function ListingCard({ listing, isOwn = false }: Props) {
           {listing.event?.title || 'Мероприятие'}
         </h3>
 
+        {listing.event?.organizer_id && (
+          <p className="text-[11px] text-gray-400 mb-2">
+            Организатор: <span className="font-semibold text-gray-500">{listing.event.organizer_id}</span>
+          </p>
+        )}
+
         {/* Venue */}
         {listing.event?.venue && (
           <p className="text-xs text-gray-500 mb-1 flex items-center gap-1">

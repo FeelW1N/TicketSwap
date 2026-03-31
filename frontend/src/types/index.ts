@@ -19,6 +19,23 @@ export interface Event {
   image_url?: string
 }
 
+export interface Organizer {
+  id: string
+  name: string
+}
+
+export interface OrganizerEvent {
+  id: string
+  title: string
+  description?: string
+  venue?: string
+  city?: string
+  event_date: string
+  category?: string
+  image_url?: string
+  sample_ticket_ids?: string[]
+}
+
 export interface Listing {
   id: string
   ticket_id: string
@@ -51,7 +68,7 @@ export interface Payment {
   id: string
   order_id: string
   provider: string
-  status: 'CREATED' | 'CONFIRMED' | 'FAILED'
+  status: 'CREATED' | 'CONFIRMED' | 'FAILED' | 'REFUNDED'
   amount: number
   checkout_url?: string
   created_at: string

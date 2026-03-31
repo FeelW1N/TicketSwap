@@ -1,5 +1,7 @@
 """Celery-задачи: переоформление билета и уведомления."""
+
 import logging
+from decimal import Decimal
 import requests
 from celery import shared_task
 from app.extensions import db
@@ -7,12 +9,15 @@ from app.models.reissue import ReissueRequest, ReissueStatus
 from app.models.order import Order, OrderStatus
 from app.models.ticket import Ticket, TicketStatus
 from app.models.listing import Listing, ListingStatus
+from app.models.payment import PaymentStatus
+from app.models.user import User
 from app.services.organizer import get_organizer_adapter
 from app.services.audit import log_event
 
 logger = logging.getLogger(__name__)
 
 MAX_REISSUE_ATTEMPTS = 3
+PLATFORM_FEE = Decimal("0.05")
 
 
 @shared_task(bind=True, max_retries=MAX_REISSUE_ATTEMPTS, default_retry_delay=60)
@@ -68,9 +73,14 @@ def process_reissue(self, reissue_request_id: str) -> dict:
             try:
                 from flask import current_app
                 from app.services.storage import storage_service
-                file_bytes = requests.get(result.new_ticket_file_url, timeout=30).content
+
+                file_bytes = requests.get(
+                    result.new_ticket_file_url, timeout=30
+                ).content
                 new_s3_key = storage_service.upload_ticket_file(
-                    file_bytes, f"ticket_{result.new_external_ticket_id}.pdf", str(buyer.id)
+                    file_bytes,
+                    f"ticket_{result.new_external_ticket_id}.pdf",
+                    str(buyer.id),
                 )
             except Exception as e:
                 logger.warning("Failed to download/store new ticket file: %s", e)
@@ -82,7 +92,20 @@ def process_reissue(self, reissue_request_id: str) -> dict:
         # Переводим листинг в SOLD
         listing.status = ListingStatus.SOLD
 
+        seller = User.query.get(order.listing.seller_user_id)
+        if seller:
+            payout = Decimal(str(order.amount)) * (Decimal("1") - PLATFORM_FEE)
+            seller.balance = Decimal(str(seller.balance or 0)) + payout
+
         db.session.commit()
+
+        if seller:
+            log_event(
+                action="WALLET_CREDITED",
+                entity_type="user",
+                entity_id=str(seller.id),
+                details={"order_id": str(order.id), "amount": float(payout)},
+            )
 
         log_event(
             action="REISSUE_SUCCESS",
@@ -104,14 +127,34 @@ def process_reissue(self, reissue_request_id: str) -> dict:
     else:
         logger.warning(
             "Reissue failed for request %s: %s %s",
-            reissue_request_id, result.error_code, result.error_message,
+            reissue_request_id,
+            result.error_code,
+            result.error_message,
         )
         reissue.error_code = result.error_code
         reissue.error_message = result.error_message
 
         if reissue.attempts >= MAX_REISSUE_ATTEMPTS:
             reissue.status = ReissueStatus.FAILED
+            order.status = OrderStatus.FAILED
+            listing.status = ListingStatus.ACTIVE
+
+            if order.payment:
+                order.payment.status = PaymentStatus.REFUNDED
+
+            buyer.balance = Decimal(str(buyer.balance or 0)) + Decimal(
+                str(order.amount)
+            )
+
             db.session.commit()
+
+            log_event(
+                action="WALLET_REFUNDED",
+                entity_type="user",
+                entity_id=str(buyer.id),
+                details={"order_id": str(order.id), "amount": float(order.amount)},
+            )
+
             log_event(
                 action="REISSUE_FAILED",
                 entity_type="reissue",
@@ -121,7 +164,10 @@ def process_reissue(self, reissue_request_id: str) -> dict:
             return {"status": "failed", "error_code": result.error_code}
         else:
             db.session.commit()
-            raise self.retry(exc=Exception(result.error_message), countdown=60 * (2 ** reissue.attempts))
+            raise self.retry(
+                exc=Exception(result.error_message),
+                countdown=60 * (2**reissue.attempts),
+            )
 
 
 @shared_task

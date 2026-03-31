@@ -9,7 +9,7 @@ import StatusBadge from '../components/StatusBadge'
 export default function ListingDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { isAuthenticated, user } = useAuthStore()
+  const { isAuthenticated, user, fetchMe } = useAuthStore()
   const [listing, setListing] = useState<Listing | null>(null)
   const [loading, setLoading] = useState(true)
   const [buying, setBuying] = useState(false)
@@ -31,13 +31,9 @@ export default function ListingDetailPage() {
     try {
       const orderResp = await ordersApi.create(listing.id)
       const order = orderResp.data
-      const paymentResp = await ordersApi.createPayment(order.id)
-      const checkoutUrl = paymentResp.data.payment.checkout_url
-      if (checkoutUrl) {
-        window.location.href = checkoutUrl
-      } else {
-        navigate(`/orders/${order.id}`)
-      }
+      await ordersApi.createPayment(order.id)
+      await fetchMe()
+      navigate(`/orders/${order.id}`)
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string } } }
       setError(err?.response?.data?.error || 'Ошибка при создании заказа')
@@ -118,6 +114,13 @@ export default function ListingDetailPage() {
           <h1 className="text-2xl font-bold text-gray-900 mb-3 leading-tight">
             {listing.event?.title || 'Билет'}
           </h1>
+
+          {listing.event?.organizer_id && (
+            <div className="mb-4 inline-flex items-center gap-2 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-xs text-gray-500">
+              <span className="w-2 h-2 rounded-full bg-brand-400" />
+              Организатор: <span className="font-semibold text-gray-700">{listing.event.organizer_id}</span>
+            </div>
+          )}
 
           {/* Event info */}
           <div className="space-y-2 mb-5">
@@ -222,6 +225,12 @@ export default function ListingDetailPage() {
                 {error}
               </div>
             )}
+
+            {!isOwn && listing.status === 'ACTIVE' && (
+              <p className="mt-4 text-xs text-gray-400">
+                Перед покупкой убедитесь, что на внутреннем кошельке хватает средств на оплату.
+              </p>
+            )}
           </div>
         </div>
 
@@ -235,7 +244,7 @@ export default function ListingDetailPage() {
             </div>
             <p className="text-sm text-brand-700 leading-relaxed">
               <strong>Атомарное переоформление:</strong> после оплаты ваш билет будет переоформлен через
-              систему организатора. Старый билет аннулируется — вы получите новый с вашим именем.
+              систему организатора. Сумма спишется с кошелька, старый билет аннулируется, а вы получите новый с вашим именем.
             </p>
           </div>
         </div>
